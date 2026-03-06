@@ -1,32 +1,31 @@
 package org.example.demo;
 
-import java.lang.reflect.InvocationTargetException;
+import java.io.IOException;
 import java.lang.reflect.Method;
-import java.util.HashMap;
-import java.util.Map;
+import java.net.URISyntaxException;
 
 public class DemoApplication {
 
-	private static Map<String, Method> controllerMethods = new HashMap<>();
-
-	public static void main(String[] args) throws ClassNotFoundException, InvocationTargetException, IllegalAccessException {
+	public static void main(String[] args) throws ClassNotFoundException, IOException, URISyntaxException {
 		Class<?> c = Class.forName(args[0]);
 
 		if (c.isAnnotationPresent(RestController.class)) {
-			for (Method m : c.getDeclaredMethods()){
-				if (m.isAnnotationPresent(GetMapping.class)){
+			for (Method m : c.getDeclaredMethods()) {
+				if (m.isAnnotationPresent(GetMapping.class)) {
 					GetMapping a = m.getAnnotation(GetMapping.class);
-					System.out.println("adding controllerMethod for Path " + a.value());
-					controllerMethods.put(a.value(), m);
+					String path = a.value();
+					System.out.println("Registering route: " + path + " -> " + m.getName());
+					HttpServer.get(path, (req, res) -> {
+						try {
+							return (String) m.invoke(null);
+						} catch (Exception e) {
+							return "Error: " + e.getMessage();
+						}
+					});
 				}
 			}
 		}
 
-		String executionPath = args[1];
-		Method m = controllerMethods.get(executionPath);
-
-		System.out.println("Invoking: " +  m.getName());
-		System.out.println(m.invoke(null));
-
+		HttpServer.start();
 	}
 }
