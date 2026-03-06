@@ -4,7 +4,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.OutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URI;
@@ -51,11 +51,11 @@ public class HttpServer {
                 System.exit(1);
             }
 
-            PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+            OutputStream out = clientSocket.getOutputStream();
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(
                             clientSocket.getInputStream()));
-            String inputLine, outputLine;
+            String inputLine;
 
             boolean isFirstLine = true;
 
@@ -66,16 +66,13 @@ public class HttpServer {
                 System.out.println("Received: " + inputLine);
                 if (isFirstLine) {
                     String[] firstLineTokens = inputLine.split(" ");
-                    String method = firstLineTokens[0];
                     String uristr = firstLineTokens[1];
-                    String protocolVersion = firstLineTokens[2];
                     URI requestedURI = new URI(uristr);
                     reqPath = requestedURI.getPath();
                     request = parseRequest(requestedURI);
                     System.out.println("Path: " + reqPath);
                     isFirstLine = false;
                 }
-
 
                 if (!in.ready()) {
                     break;
@@ -85,28 +82,22 @@ public class HttpServer {
             Route route = endPoints.get(reqPath);
 
             if (route != null) {
-                outputLine = "HTTP/1.1 200 OK\n\r"
-                        + "Content-Type: text/html\n\r"
-                        + "\n\r"
-                        + "<!DOCTYPE html>"
-                        + "<html>"
-                        + "<head>"
-                        + "<meta charset=\"UTF-8\">"
-                        + "<title>Title of the document</title>\n"
-                        + "</head>"
-                        + "<body>"
+                String body = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\">"
+                        + "<title>Title of the document</title></head><body>"
                         + route.handle(request, new Response())
-                        + "</body>"
-                        + "</html>";
+                        + "</body></html>";
+                byte[] bodyBytes = body.getBytes("UTF-8");
+                String headers = "HTTP/1.1 200 OK\r\n"
+                        + "Content-Type: text/html; charset=UTF-8\r\n"
+                        + "Content-Length: " + bodyBytes.length + "\r\n"
+                        + "\r\n";
+                out.write(headers.getBytes("UTF-8"));
+                out.write(bodyBytes);
             } else {
-                String body = serveStaticFile(reqPath);
-                outputLine = "HTTP/1.1 200 OK\n\r"
-                        + "Content-Type: text/html\n\r"
-                        + "\n\r"
-                        + body;
+                serveStaticFile(reqPath, out);
             }
-            out.println(outputLine);
 
+            out.flush();
             out.close();
             in.close();
             clientSocket.close();
@@ -138,20 +129,41 @@ public class HttpServer {
         return new Request(params);
     }
 
-    private static String serveStaticFile(String reqPath) {
+    private static void serveStaticFile(String reqPath, OutputStream out) throws IOException {
         if (staticFilesLocation != null) {
             String base = staticFilesLocation.startsWith("/") ? staticFilesLocation : "/" + staticFilesLocation;
             String resourcePath = base + reqPath;
             try (InputStream fileStream = HttpServer.class.getResourceAsStream(resourcePath)) {
                 if (fileStream != null) {
-                    return new String(fileStream.readAllBytes());
+                    byte[] body = fileStream.readAllBytes();
+                    String contentType = getContentType(reqPath);
+                    String headers = "HTTP/1.1 200 OK\r\n"
+                            + "Content-Type: " + contentType + "\r\n"
+                            + "Content-Length: " + body.length + "\r\n"
+                            + "\r\n";
+                    out.write(headers.getBytes("UTF-8"));
+                    out.write(body);
+                    return;
                 }
-            } catch (IOException e) {
-                System.err.println("Error reading static file: " + e.getMessage());
             }
         }
-        return "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>Not Found</title></head>"
-                + "<body>404 - Not Found</body></html>";
+        byte[] body = "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>Not Found</title></head>"
+                .concat("<body>404 - Not Found</body></html>").getBytes("UTF-8");
+        String headers = "HTTP/1.1 404 Not Found\r\n"
+                + "Content-Type: text/html; charset=UTF-8\r\n"
+                + "Content-Length: " + body.length + "\r\n"
+                + "\r\n";
+        out.write(headers.getBytes("UTF-8"));
+        out.write(body);
+    }
+
+    private static String getContentType(String path) {
+        if (path.endsWith(".png"))  return "image/png";
+        if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+        if (path.endsWith(".gif"))  return "image/gif";
+        if (path.endsWith(".css"))  return "text/css";
+        if (path.endsWith(".js"))   return "application/javascript";
+        return "text/html; charset=UTF-8";
     }
 
 
